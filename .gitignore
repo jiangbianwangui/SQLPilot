@@ -1,0 +1,15 @@
+# 环境变量与密钥（绝对不能提交）
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/

@@ -1,0 +1,157 @@
+# SQLPilot
+
+> 用自然语言问数据库 —— 一个能自己选表、自己写 SQL、写错了自己改的查询 Agent。
+
+## 📝 项目简介
+
+SQLPilot 是一个 **text-to-SQL 智能体**：你用大白话提问（如"北京客户一共花了多少钱"），它自己决定该看哪些表、自己写出 SQL、在**只读连接**上执行，如果 SQL 写错了（字段名幻觉、语法笔误、聚合写错），它把数据库的报错原样喂回大模型，让模型自己改，直到跑出结果。
+
+它解决的真实问题是：**让不懂 SQL 的人也能从业务库里取数，同时不让大模型碰坏数据库**。
+
+项目围绕三条主线设计：
+
+- **安全**：LLM 生成的 SQL 不可信，绝不能拿到连接直接执行。
+- **闭环**：Agent 的价值不在于"一次写对"，而在于"错了能改"。
+- **可测**：每一层职责单一、依赖可注入，单测不需要真数据库、也不需要真 API。
+
+## ✨ 核心功能
+
+- [x] **自然语言转 SQL**：一句话提问，自动产出可执行的 SELECT 查询
+- [x] **智能选表**：从几十上百张表里挑出最相关的几张喂给大模型，避免上下文撑爆、选错表
+- [x] **错误自修复**：执行失败 → 把数据库报错喂回大模型 → 自动重写，最多重试 3 次
+- [x] **三层安全校验**：AST 解析 + 关键词黑名单 + 只读账号，挡住 DROP / 注入 / 堆叠查询
+- [x] **只读执行**：强制 LIMIT 防内存爆，错误信息归一化为中文便于模型修正
+- [x] **慢查询诊断（差异化功能）**：用数据库自带的 `EXPLAIN` 分析执行计划，检测全表扫描并建议建索引
+- [x] **多方言驱动**：同一套逻辑可跑 SQLite 内存库与真实 MySQL，诊断层按 `engine.dialect.name` 自动切换 `EXPLAIN` 语法
+- [x] **零 Docker 一键 Demo**：SQLite 内存库即可跑通整条链路
+
+## 🛠️ 技术栈
+
+- **Agent 框架**：HelloAgents（`hello-agents`，0.2.4–0.2.9）
+- **智能体范式**：单 Agent 闭环（生成 → 执行 → 反馈 → 重写），非多 Agent 空转
+- **SQL 解析 / 安全**：`sqlglot`（AST 解析）、正则兜底
+- **数据库访问**：`SQLAlchemy 2.x` + `PyMySQL`，SQLite 与 MySQL 双方言实测通过（正式环境为 MySQL 只读账号）
+- **大模型**：DeepSeek（OpenAI 兼容接口），通过环境变量可切换 Ollama / 通义等
+- **工程**：`pytest`（71 个用例）、`loguru` 日志
+- **设计取舍**：刻意不引入 `torch` / `transformers`，全部推理走 LLM API，环境轻、启动快
+
+## 🚀 快速开始
+
+### 环境要求
+
+- Python 3.10+（已在 3.13 验证）
+- 一个 OpenAI 兼容的大模型 API Key（默认 DeepSeek）
+
+### 安装依赖
+
+```bash
+# 官方源偶发不可用，推荐阿里云镜像
+pip install -i https://mirrors.aliyun.com/pypi/simple -r requirements.txt
+```
+
+### 配置 API 密钥
+
+在项目根目录创建 `.env` 文件：
+
+```ini
+LLM_API_KEY=sk-你的key
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL_ID=deepseek-chat
+```
+
+### 运行 Demo
+
+无需 MySQL / Docker，用 SQLite 内存库即可跑通整条链路：
+
+```bash
+python -m app.demo "北京客户一共花了多少钱"
+```
+
+> 也可以直连真实数据库：`app/demo.py` 里的 `build_mysql_engine()` 连一个 **MySQL 只读账号**，
+> 诊断工具会自动按方言切换 `EXPLAIN` 语法，`SQLAgent` 上层代码一行都不用改。
+
+## 📖 使用示例
+
+**代码调用**（demo 引擎，可换成任意 SQLAlchemy 引擎）：
+
+```python
+from app.demo import build_demo_engine
+from app.core.llm import llm_generate
+from app.agents.sql_agent import SQLAgent
+
+agent = SQLAgent(build_demo_engine(), llm_generate=llm_generate)
+answer = agent.ask("北京客户一共花了多少钱")
+print(answer.render())
+```
+
+**慢查询诊断**（不依赖大模型，可直接跑）：
+
+```python
+from app.demo import build_demo_engine
+from app.tools.diagnose_tool import DiagnoseTool, render
+
+tool = DiagnoseTool(build_demo_engine())
+print(render(tool.diagnose("SELECT * FROM products WHERE name='智能手机 X1'")))
+```
+
+真实输出：
+
+```
+SQL: SELECT * FROM products WHERE name='智能手机 X1'
+执行计划:
+  SCAN products
+检测到全表扫描: products
+建议:
+  - 建议为products表的相关字段建索引
+```
+
+同一个工具连 MySQL 时，会自动改用 MySQL 的 `EXPLAIN`，按 `type='ALL'` 且无命中索引判定全表扫描（SQLite 走 `EXPLAIN QUERY PLAN`，解析文本行）—— 调用方代码完全一致。
+
+主问答的返回结构（`Answer.render()` 格式）包含：选中的表、每次尝试的 SQL 与成败、最终结果、耗时——方便演示"第一次写错、第二次改对"的闭环过程。
+
+## 🎯 项目亮点
+
+- **安全分层，而非仅靠黑名单**：先用 `sqlglot` 把 SQL 解析成 AST，只放行 SELECT/UNION/WITH；再做关键词黑名单兜底；最后靠数据库**只读账号**兜底。注释会在检查前剥离，避免 `-- DROP TABLE` 这类藏匿手段，也避免把 `created_at` 里的 `ate` 误判成危险词。
+- **错误自修复闭环**：这是 Agent 相对"一次性 prompt"的核心价值——把数据库真实报错原样喂回模型重写，而不是直接把错误抛给用户。
+- **多道防线，绝不裸奔**：`sqlglot` 缺失时降级为正则；给查询补 LIMIT 失败时退回原句；执行异常归一化为中文。任何一层出问题都不会让整个服务崩。
+- **引擎无关 + 职责分离**：schema 探查用 SQLAlchemy `inspector`，MySQL / SQLite / PostgreSQL 通用；诊断层按方言适配 `EXPLAIN`；LLM 与执行器都以"可调用对象"注入，单测用假函数即可覆盖完整重试逻辑。
+- **中文友好**：错误信息是可读的中文，能直接作为下一轮 prompt 的一部分，让模型自我修正。
+
+## 📊 性能评估
+
+本项目没有做生产级压测（演示库为 SQLite 内存小库），因此本节**只讲架构层面的取舍，不列未经实测的延迟 / QPS 数字**。
+
+- **安全不靠运气**：三层校验 + 只读账号，从"代码层"和"数据库层"两道关防住注入，而不是依赖关键词黑名单（最易被绕过）。
+- **不崩比快更重要**：多级降级保证单点故障不影响整体，错误归一化让模型能继续自我修复。
+- **轻量低成本**：全部推理走 LLM API，不加载重模型；强制 LIMIT 防止超大结果集拖垮内存；`EXPLAIN` 诊断基于数据库原生能力，几乎零额外开销。
+- **可测即可靠**：依赖注入使 71 个单元测试无需真 API 即可秒级跑完（MySQL 方言用例在无 MySQL 的环境自动跳过），CI 友好。
+
+## 🔮 未来计划
+
+- [ ] **选表升级为向量召回 + 外键图扩展**：当前用规则打分（2-gram + 注释匹配），不理解"北京客户花了多少钱"里的隐含 JOIN 关系，已预留 `select_tables` 接口
+- [ ] **支持多轮对话与上下文记忆**：记住用户上一句提到的表 / 时间范围
+- [ ] **诊断升级**：补齐 PostgreSQL 方言（`EXPLAIN (ANALYZE, BUFFERS)`），并覆盖复合索引、JOIN 顺序等更细的执行计划建议
+- [ ] **方言抽象层**：把当前 `if dialect == ...` 的分支抽成 `Dialect` 接口，新增数据库时只加一个实现类
+
+## 🤝 贡献指南
+
+欢迎提出 Issue 和 Pull Request！提交前请确保：
+
+- `pytest` 全部通过
+- 新增功能附带测试
+- 安全相关改动同步更新 `tests/test_sql_guard.py`
+
+## 📄 许可证
+
+CC BY-NC-SA 4.0。本项目在学习 Datawhale **Hello-Agents** 教程（同许可）的基础上由作者独立实现，
+原创代码版权归作者所有；如引用本仓库，请保留原作者署名并注明改编部分。
+
+## 👤 作者
+
+- GitHub：[@jiangbianwangui](https://github.com/jiangbianwangui)
+- 提交到 Hello-Agents 共创仓库时，目录名为 `jiangbianwangui-SQLPilot`，PR 标题：`[毕业设计] SQLPilot - 自然语言转 SQL 的数据库查询 Agent`
+
+## 🙏 致谢
+
+- [Datawhale](https://github.com/datawhalechina) 与 [Hello-Agents](https://github.com/datawhalechina/hello-agents) 教程提供的框架与选题指引
+- 社区 `DatabaseAgent` 等实现带来的对比与启发
