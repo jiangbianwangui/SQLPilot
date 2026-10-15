@@ -133,3 +133,55 @@ def test_custom_tool_can_be_injected(engine):
     assert reply.ok
     assert calls == [{}]
     assert reply.trace[0][2] == "fake schema"
+
+
+def test_validate_args_missing_required(engine):
+    # 模型漏传必填参数 sql -> 校验层应在调工具前拦截，工具根本不被调用
+    calls = []
+
+    def fake_run(**kwargs):
+        calls.append(kwargs)
+        return "ok"
+
+    from app.agents.data_agent import ToolSpec
+
+    tool = ToolSpec(
+        "run_sql", "fake",
+        {"type": "object",
+         "properties": {"sql": {"type": "string"}},
+         "required": ["sql"]},
+        fake_run,
+    )
+    agent = DataAnalysisAgent(
+        engine, llm_chat=lambda *a, **k: None, tools=[tool]
+    )
+    res = agent._dispatch(ToolCall("c1", "run_sql", {}))
+    assert "工具参数校验失败" in res
+    assert "缺少必填参数 'sql'" in res
+    assert calls == []  # 工具未被调用
+
+
+def test_validate_args_wrong_type(engine):
+    # 模型把应是 string 的 sql 传成数字 -> 校验层拦截
+    calls = []
+
+    def fake_run(**kwargs):
+        calls.append(kwargs)
+        return "ok"
+
+    from app.agents.data_agent import ToolSpec
+
+    tool = ToolSpec(
+        "run_sql", "fake",
+        {"type": "object",
+         "properties": {"sql": {"type": "string"}},
+         "required": ["sql"]},
+        fake_run,
+    )
+    agent = DataAnalysisAgent(
+        engine, llm_chat=lambda *a, **k: None, tools=[tool]
+    )
+    res = agent._dispatch(ToolCall("c1", "run_sql", {"sql": 123}))
+    assert "工具参数校验失败" in res
+    assert "应为 string" in res
+    assert calls == []

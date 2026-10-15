@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import sys
+from typing import Optional
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
@@ -50,13 +51,24 @@ _ROWS = [
 ]
 
 
-def build_demo_engine():
-    """建一个带示例数据的 SQLite 内存库。"""
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+def build_demo_engine(path: Optional[str] = None):
+    """建一个带示例数据的 SQLite 库。
+
+    Args:
+        path: 不传则用内存库（CLI 单次运行够用）；
+              传文件路径则用文件库（Web 服务用，支持多请求/多线程安全访问）。
+    """
+    if path:
+        # 文件库：用默认连接池，每个请求拿独立连接，线程安全且数据持久
+        engine = create_engine(
+            f"sqlite:///{path}", connect_args={"check_same_thread": False}
+        )
+    else:
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
     with engine.begin() as conn:
         for ddl in _DDL:
             conn.execute(text(ddl))

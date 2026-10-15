@@ -28,12 +28,12 @@ SQLPilot 是一个 **text-to-SQL 智能体**：你用大白话提问（如"北�
 
 ## 🛠️ 技术栈
 
-- **智能体范式**：单 Agent 闭环（`SQLAgent`，生成 → 执行 → 反馈 → 重写）+ 多步工具调用 Agent（`DataAnalysisAgent`，ReAct 风格，会话记忆 + 反思重规划）。Agent 循环为自实现，HelloAgents 是学习蓝本（仓库依赖保留以便对照课程）
+- **智能体范式**：单 Agent 闭环（`SQLAgent`，生成 → 执行 → 反馈 → 重写）+ 多步工具调用 Agent（`DataAnalysisAgent`，ReAct 风格，会话记忆 + 反思重规划）。Agent 循环为**自实现**，不依赖外部 Agent 框架（早期参考过 Hello-Agents 教程思路，但代码已独立重写）
 - **LLM 接口**：OpenAI 兼容 chat + tool-calling（`DeepSeekLLM.chat`），支持 DeepSeek / 硅基流动 / 通义千问
 - **SQL 解析 / 安全**：`sqlglot`（AST 解析）、正则兜底
 - **数据库访问**：`SQLAlchemy 2.x` + `PyMySQL`，SQLite 与 MySQL 双方言实测通过（正式环境为 MySQL 只读账号）
 - **大模型**：DeepSeek（OpenAI 兼容接口），通过环境变量可切换 Ollama / 通义等
-- **工程**：`pytest`（71 个用例）、`loguru` 日志
+- **工程**：`pytest`（79 个用例）、`loguru` 日志
 - **设计取舍**：刻意不引入 `torch` / `transformers`，全部推理走 LLM API，环境轻、启动快
 
 ## 🚀 快速开始
@@ -75,6 +75,32 @@ python -m app.demo_agent
 
 > 也可以直连真实数据库：`app/demo.py` 里的 `build_mysql_engine()` 连一个 **MySQL 只读账号**，
 > 诊断工具会自动按方言切换 `EXPLAIN` 语法，`SQLAgent` 上层代码一行都不用改。
+
+## 🌐 Web 服务与公网部署
+
+除了命令行，SQLPilot 也提供 HTTP 服务（FastAPI），可一键部署为可公网访问的 Demo。
+
+```bash
+# 本地启动（默认 7860 端口），浏览器打开 http://127.0.0.1:7860
+uvicorn app.server:app --host 0.0.0.0 --port 7860
+
+# 无 LLM Key 也能跑通闭环（演示/离线用）
+SQLPILOT_FAKE_LLM=1 uvicorn app.server:app --port 7860
+```
+
+接口：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/health` | 健康检查 |
+| GET | `/api/ask?question=...` | 单步 `SQLAgent`：返回生成 SQL + 结果 + 重试过程 |
+| POST | `/api/agent` | 多步 `DataAnalysisAgent`：`{question, session_id}` → 含工具调用轨迹 |
+| POST | `/api/reset` | 清空某会话记忆 |
+| GET | `/` | 极简聊天前端 |
+
+演示库默认用**文件型 SQLite**（自带 shop 示例数据），无需外部数据库；大模型读 `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_ID` 三个环境变量。生产环境把 `build_demo_engine()` 换成 `build_mysql_engine()`（**只读账号**）即可。
+
+容器化部署见仓库根目录 `Dockerfile` + `ms_deploy.json`（魔搭 ModelScope 创空间 / Hugging Face Spaces 等 Docker 型托管均可用，官方免费档 `platform/2v-cpu-16g-mem`，端口 7860）。
 
 ## 📖 使用示例
 
@@ -149,7 +175,7 @@ print(reply.render())   # 含推理过程与最终回答
 - **安全不靠运气**：三层校验 + 只读账号，从"代码层"和"数据库层"两道关防住注入，而不是依赖关键词黑名单（最易被绕过）。
 - **不崩比快更重要**：多级降级保证单点故障不影响整体，错误归一化让模型能继续自我修复。
 - **轻量低成本**：全部推理走 LLM API，不加载重模型；强制 LIMIT 防止超大结果集拖垮内存；`EXPLAIN` 诊断基于数据库原生能力，几乎零额外开销。
-- **可测即可靠**：依赖注入使 71 个单元测试无需真 API 即可秒级跑完（MySQL 方言用例在无 MySQL 的环境自动跳过），CI 友好。
+- **可测即可靠**：依赖注入使 79 个单元测试无需真 API 即可秒级跑完（MySQL 方言用例在无 MySQL 的环境自动跳过），CI 友好。
 
 ## 🔮 未来计划
 

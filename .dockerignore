@@ -1,0 +1,13 @@
+# 不要把密钥、虚拟环境、缓存打进镜像
+.env
+.venv
+venv
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.idea/
+.vscode/
+.git/
+.ms_token

@@ -183,12 +183,56 @@ class DataAnalysisAgent:
             for t in self.tools.values()
         ]
 
+    @staticmethod
+    def _validate_args(parameters: dict, args: dict) -> Optional[str]:
+        """按 JSON Schema 子集校验工具实参，返回错误描述（None 表示通过）。
+
+        只覆盖实战够用的部分：required 存在性、基础类型、enum。
+        失败时不抛异常，而是返回可读错误，由 _dispatch 转成工具结果喂回模型，
+        让模型基于错误反思、补全参数或换工具——而不是让 Agent 崩。
+        """
+        properties = parameters.get("properties", {}) or {}
+        required = parameters.get("required", []) or []
+
+        # 1) 必填项存在性
+        for name in required:
+            if name not in args or args.get(name) is None:
+                return f"缺少必填参数 '{name}'"
+
+        # 2) 已提供参数的类型 / 枚举校验
+        type_map = {
+            "string": str,
+            "integer": int,
+            "number": (int, float),
+            "boolean": bool,
+            "array": list,
+            "object": dict,
+        }
+        for name, value in args.items():
+            schema = properties.get(name) or {}
+            expected = schema.get("type")
+            if expected and expected in type_map:
+                # bool 是 int 的子类，整数校验时需单独排除
+                if expected == "integer" and isinstance(value, bool):
+                    return f"参数 '{name}' 应为整数，得到布尔值"
+                if not isinstance(value, type_map[expected]):
+                    return f"参数 '{name}' 应为 {expected}，得到 {type(value).__name__}"
+            enum = schema.get("enum")
+            if enum is not None and value not in enum:
+                return f"参数 '{name}' 取值 {value!r} 不在允许范围 {enum}"
+        return None
+
     def _dispatch(self, tc) -> str:
         spec = self.tools.get(tc.name)
         if spec is None:
             return f"未知工具: {tc.name}"
+        args = tc.arguments if isinstance(tc.arguments, dict) else {}
+        # 调工具前先按 schema 校验，避免把非法参数直接塞进工具导致崩溃
+        err = self._validate_args(spec.parameters, args)
+        if err:
+            return f"工具参数校验失败: {err}"
         try:
-            return spec.call(**(tc.arguments or {}))
+            return spec.call(**args)
         except Exception as e:  # 工具崩了也不能让整个 Agent 挂掉
             return f"工具执行出错: {e}"
 
