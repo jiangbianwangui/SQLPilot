@@ -40,3 +40,6 @@ loguru>=0.7.0
 #   - 给查询加 LIMIT 用 tree.limit(n)，它返回「新树」，必须接住返回值
 #   - 不要手写 exp.Limit(this=exp.Literal.number(n))，本机会把数字
 #     错贴到上一个标识符上（如 c.id200）
+
+# 可选：DataAnalysisAgent 的 plot 出图工具需要（不装则工具会优雅降级提示）
+matplotlib>=3.5.0

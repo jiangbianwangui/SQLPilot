@@ -24,11 +24,12 @@ SQLPilot 是一个 **text-to-SQL 智能体**：你用大白话提问（如"北�
 - [x] **慢查询诊断（差异化功能）**：用数据库自带的 `EXPLAIN` 分析执行计划，检测全表扫描并建议建索引
 - [x] **多方言驱动**：同一套逻辑可跑 SQLite 内存库与真实 MySQL，诊断层按 `engine.dialect.name` 自动切换 `EXPLAIN` 语法
 - [x] **零 Docker 一键 Demo**：SQLite 内存库即可跑通整条链路
+- [x] **多步数据分析 Agent（升级）**：`DataAnalysisAgent` 以 ReAct 风格的工具调用循环工作——自己决定何时查表结构、跑 SQL、诊断、出图，并维护会话记忆支持多轮追问与反思重规划
 
 ## 🛠️ 技术栈
 
-- **Agent 框架**：HelloAgents（`hello-agents`，0.2.4–0.2.9）
-- **智能体范式**：单 Agent 闭环（生成 → 执行 → 反馈 → 重写），非多 Agent 空转
+- **智能体范式**：单 Agent 闭环（`SQLAgent`，生成 → 执行 → 反馈 → 重写）+ 多步工具调用 Agent（`DataAnalysisAgent`，ReAct 风格，会话记忆 + 反思重规划）。Agent 循环为自实现，HelloAgents 是学习蓝本（仓库依赖保留以便对照课程）
+- **LLM 接口**：OpenAI 兼容 chat + tool-calling（`DeepSeekLLM.chat`），支持 DeepSeek / 硅基流动 / 通义千问
 - **SQL 解析 / 安全**：`sqlglot`（AST 解析）、正则兜底
 - **数据库访问**：`SQLAlchemy 2.x` + `PyMySQL`，SQLite 与 MySQL 双方言实测通过（正式环境为 MySQL 只读账号）
 - **大模型**：DeepSeek（OpenAI 兼容接口），通过环境变量可切换 Ollama / 通义等
@@ -65,6 +66,11 @@ LLM_MODEL_ID=deepseek-chat
 
 ```bash
 python -m app.demo "北京客户一共花了多少钱"
+
+# 多步数据分析 Agent（工具调用 + 会话记忆 + 反思重规划）
+python -m app.demo_agent "各城市各有多少客户？"
+# 不带参数进入多轮对话 REPL（可连续追问）
+python -m app.demo_agent
 ```
 
 > 也可以直连真实数据库：`app/demo.py` 里的 `build_mysql_engine()` 连一个 **MySQL 只读账号**，
@@ -117,6 +123,25 @@ SQL: SELECT * FROM products WHERE name='智能手机 X1'
 - **引擎无关 + 职责分离**：schema 探查用 SQLAlchemy `inspector`，MySQL / SQLite / PostgreSQL 通用；诊断层按方言适配 `EXPLAIN`；LLM 与执行器都以"可调用对象"注入，单测用假函数即可覆盖完整重试逻辑。
 - **中文友好**：错误信息是可读的中文，能直接作为下一轮 prompt 的一部分，让模型自我修正。
 
+## 🤖 多步数据分析 Agent（DataAnalysisAgent）
+
+在 `SQLAgent` 单步闭环之上，`DataAnalysisAgent` 把"取数"升级成真正的对话式数据分析：
+
+- **工具调用（Tool Calling）**：模型自己决定何时 `inspect_schema` 看结构、`run_sql` 取数、`diagnose` 诊断慢查询、`plot` 出图，而不是写死流水线与工具顺序。
+- **会话记忆（Memory）**：跨轮保留上下文，支持追问（"那上海呢？""只看今年呢？"）。
+- **反思-重规划（Reflection）**：拿到执行结果后，模型自己判断继续、换 SQL、澄清歧义还是收尾——这是 Agent 相对"一把函数"的核心价值。
+- **安全不打折**：`run_sql` 底层复用 `ExecuteTool`，三层校验 + 只读账号 + 强制 LIMIT 全部生效，模型写 DROP 也会被拦。
+
+```python
+from app.demo import build_demo_engine
+from app.core.llm import llm_chat
+from app.agents.data_agent import DataAnalysisAgent
+
+agent = DataAnalysisAgent(build_demo_engine(), llm_chat=llm_chat)
+reply = agent.run("各城市各有多少客户？")
+print(reply.render())   # 含推理过程与最终回答
+```
+
 ## 📊 性能评估
 
 本项目没有做生产级压测（演示库为 SQLite 内存小库），因此本节**只讲架构层面的取舍，不列未经实测的延迟 / QPS 数字**。
@@ -129,7 +154,7 @@ SQL: SELECT * FROM products WHERE name='智能手机 X1'
 ## 🔮 未来计划
 
 - [ ] **选表升级为向量召回 + 外键图扩展**：当前用规则打分（2-gram + 注释匹配），不理解"北京客户花了多少钱"里的隐含 JOIN 关系，已预留 `select_tables` 接口
-- [ ] **支持多轮对话与上下文记忆**：记住用户上一句提到的表 / 时间范围
+- [x] **支持多轮对话与上下文记忆**：`DataAnalysisAgent` 的 `Memory` 跨轮保留上下文，支持追问（"那上海呢？""只看今年呢？"）
 - [ ] **诊断升级**：补齐 PostgreSQL 方言（`EXPLAIN (ANALYZE, BUFFERS)`），并覆盖复合索引、JOIN 顺序等更细的执行计划建议
 - [ ] **方言抽象层**：把当前 `if dialect == ...` 的分支抽成 `Dialect` 接口，新增数据库时只加一个实现类
 

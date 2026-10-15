@@ -14,7 +14,9 @@ LLM 适配器 —— DeepSeek（OpenAI 兼容接口）。
 
 from __future__ import annotations
 
+import json
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -73,6 +75,49 @@ class DeepSeekLLM:
         data = response.json()
         return data["choices"][0]["message"]["content"]
 
+    def chat(
+        self, messages: list[dict], tools: Optional[list] = None
+    ) -> "ChatResponse":
+        """多轮 + 工具调用接口（OpenAI 兼容）。
+
+        用于数据分析 Agent：把历史消息和工具定义发给模型，
+        模型返回纯文本（最终回答）或 tool_calls（要执行的工具）。
+        """
+        if not self.api_key:
+            raise RuntimeError("缺少 LLM_API_KEY，请在项目根目录 .env 里配置")
+
+        url = f"{self.base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload: dict = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0,
+        }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+
+        response = httpx.post(url, json=payload, headers=headers, timeout=self.timeout)
+        response.raise_for_status()
+        msg = response.json()["choices"][0]["message"]
+        content = msg.get("content") or ""
+        raw_calls = msg.get("tool_calls") or []
+        tool_calls: list[ToolCall] = []
+        for tc in raw_calls:
+            fn = tc.get("function", {})
+            args_str = fn.get("arguments", "{}") or "{}"
+            try:
+                args = json.loads(args_str)
+            except json.JSONDecodeError:
+                args = {}
+            tool_calls.append(
+                ToolCall(id=tc.get("id", ""), name=fn.get("name", ""), arguments=args)
+            )
+        return ChatResponse(content=content, tool_calls=tool_calls)
+
 
 _llm_singleton: Optional[DeepSeekLLM] = None
 
@@ -88,3 +133,36 @@ def get_llm() -> DeepSeekLLM:
 def llm_generate(prompt: str) -> str:
     """模块级函数：正好是 RetryLoop 需要的签名。"""
     return get_llm().generate(prompt)
+
+
+@dataclass
+class ToolCall:
+    """一次工具调用（模型返回）。"""
+
+    id: str
+    name: str
+    arguments: dict
+
+    def to_openai(self) -> dict:
+        """转成 OpenAI 消息格式里 assistant 的 tool_calls 项。"""
+        return {
+            "id": self.id,
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "arguments": json.dumps(self.arguments, ensure_ascii=False),
+            },
+        }
+
+
+@dataclass
+class ChatResponse:
+    """模型一次 chat 的返回。"""
+
+    content: str = ""
+    tool_calls: list = field(default_factory=list)
+
+
+def llm_chat(messages: list[dict], tools: Optional[list] = None) -> ChatResponse:
+    """模块级便捷函数：正好是 DataAnalysisAgent 需要的签名。"""
+    return get_llm().chat(messages, tools)
