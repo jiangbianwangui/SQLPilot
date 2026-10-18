@@ -91,9 +91,11 @@ class SchemaRetriever:
                 if c.comment and t in c.comment.lower():   # 命中字段注释
                     score += 2
 
-        # 聚合类问题：含数值字段的表额外加权
+        # 聚合类问题：含数值字段的表额外加权。
+        # 但只在「该表已经命中过关键词(score>0)」时才加成——否则所有带数字列的
+        # 无关表（如 staff/suppliers）都会白捡 2 分，挤进 top_k 反而误导 LLM。
         lowered_q = question.lower()
-        if any(h in lowered_q for h in AGG_HINTS):
+        if score > 0 and any(h in lowered_q for h in AGG_HINTS):
             if any(any(nt in c.type.lower() for nt in _NUMERIC_TYPES) for c in info.columns):
                 score += 2
 

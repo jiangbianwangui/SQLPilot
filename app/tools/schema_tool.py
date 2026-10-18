@@ -75,6 +75,17 @@ class SchemaTool:
         if table not in inspector.get_table_names():
             return None
 
+        # 注释增强：优先用 engine.sqlpilot_comments 注入的中文注释。
+        # SQLite 的 inspector 读不到表/列 COMMENT（演示库靠这里补），而 MySQL
+        # 真实库自带 COMMENT，engine.sqlpilot_comments 里没有该 key，自动走下方 inspector 分支。
+        injected = (getattr(self.engine, "sqlpilot_comments", None) or {}).get(table)
+        tbl_comment_inject = (
+            injected.get("table") if isinstance(injected, dict) else None
+        )
+        col_comments_inject = (
+            injected.get("columns", {}) if isinstance(injected, dict) else {}
+        )
+
         raw_cols = inspector.get_columns(table)
         columns = [
             ColumnInfo(
@@ -82,18 +93,20 @@ class SchemaTool:
                 type=str(c["type"]),
                 nullable=bool(c.get("nullable", True)),
                 default=_safe_default(c.get("default")),
-                comment=c.get("comment") or None,
+                comment=c.get("comment") or col_comments_inject.get(c["name"]) or None,
             )
             for c in raw_cols
         ]
 
-        # 表级备注：MySQL 8 的 inspector 不直接给，这里宽容处理
-        comment = None
-        try:
-            table_comment = inspector.get_table_comment(table)
-            comment = (table_comment or {}).get("text") or None
-        except Exception:
-            comment = None
+        # 表级备注：MySQL 8 的 inspector 不直接给，这里宽容处理；
+        # 演示库则用注入的注释兜底。
+        comment = tbl_comment_inject
+        if comment is None:
+            try:
+                table_comment = inspector.get_table_comment(table)
+                comment = (table_comment or {}).get("text") or None
+            except Exception:
+                comment = None
 
         return TableInfo(name=table, columns=columns, comment=comment)
 
