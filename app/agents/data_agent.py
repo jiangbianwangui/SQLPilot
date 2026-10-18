@@ -76,6 +76,29 @@ class AgentReply:
         lines.append(self.text)
         return "\n".join(lines)
 
+    def render_markdown(self) -> str:
+        """渲染成 Gradio Markdown（Chatbot 按 Markdown 渲染，单换行会被压平）。
+
+        过程用有序列表，工具参数过长（比如整条 SQL）时截断，保证可读。
+        """
+        md: list[str] = []
+        if self.trace:
+            md.append("**推理过程**")
+            md.append("")
+            for i, (name, args, result) in enumerate(self.trace, 1):
+                parts = []
+                for k, v in (args or {}).items():
+                    s = " ".join(str(v).split())
+                    if len(s) > 60:
+                        s = s[:60] + "…"
+                    parts.append(f"{k}={s}")
+                md.append(f"{i}. **{name}**({', '.join(parts)})")
+            md.append("")
+        md.append("**回答**")
+        md.append("")
+        md.append(self.text or "（无内容）")
+        return "\n".join(md)
+
 
 class Memory:
     """会话级记忆：存 OpenAI 格式的消息列表。"""

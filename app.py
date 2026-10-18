@@ -21,7 +21,7 @@ single_agent = SQLAgent(_engine, llm_generate=_llm_generate)
 def single_fn(question: str) -> str:
     if not (question or "").strip():
         return "请输入一个自然语言问题。"
-    return single_agent.ask(question).render()
+    return single_agent.ask(question).render_markdown()
 
 
 def respond(message: str, history, state):
@@ -31,7 +31,7 @@ def respond(message: str, history, state):
     if state is None:
         state = DataAnalysisAgent(_engine, llm_chat=_llm_chat)
     reply = state.run(message)
-    history.append((message, reply.render()))
+    history.append((message, reply.render_markdown()))
     return "", history, state
 
 
@@ -49,8 +49,18 @@ with gr.Blocks(title="SQLPilot") as demo:
                 placeholder="例如：北京客户一共花了多少钱？",
                 lines=2,
             )
+            gr.Examples(
+                examples=[
+                    "北京客户一共花了多少钱？",
+                    "每个城市有多少客户？",
+                    "订单金额最高的 5 笔是多少？",
+                ],
+                inputs=q,
+                label="点一下试试",
+            )
+            btn1 = gr.Button("运行查询", variant="primary")
             out1 = gr.Markdown()
-            gr.Button("运行查询").click(single_fn, q, out1)
+            btn1.click(single_fn, q, out1)
 
         with gr.Tab("多步分析 Agent"):
             gr.Markdown(

@@ -62,6 +62,72 @@ class Answer:
         lines.append(f"耗时: {self.elapsed:.2f}s")
         return "\n".join(lines)
 
+    def render_markdown(self) -> str:
+        """渲染成 Web 端（Gradio Markdown）展示用的结果。
+
+        与 render() 的区别：render() 是终端诊断文本，靠单个换行分段；
+        而 Markdown 会把单个换行压成空格，直接塞进去会挤成一整行。
+        这里显式用空行分段、代码块包 SQL、Markdown 表格呈结果。
+        """
+        md: list[str] = [f"**问题**：{self.question}", ""]
+
+        if self.ok:
+            md.append(f"**结论**：{self._summary()}")
+            md.append("")
+            if self.rows:
+                cols = list(self.columns) or list(self.rows[0].keys())
+                width = max((len(r) for r in self.rows), default=len(cols))
+                if len(cols) < width:          # 列名缺失时补位，避免表格错位
+                    cols = cols + [f"col{i}" for i in range(len(cols), width)]
+                md.append("| " + " | ".join(str(c) for c in cols) + " |")
+                md.append("| " + " | ".join("---" for _ in cols) + " |")
+                for r in self.rows[:50]:
+                    vals = [str(v) for v in r.values()]
+                    if len(vals) < len(cols):
+                        vals += [""] * (len(cols) - len(vals))
+                    md.append("| " + " | ".join(vals) + " |")
+                if len(self.rows) > 50:
+                    md.append("")
+                    md.append(f"> 仅展示前 50 行，共 {len(self.rows)} 行。")
+            md.append("")
+            md.append("**生成的 SQL**")
+            md.append("")
+            md.append("```sql")
+            md.append(self.sql.strip())
+            md.append("```")
+        else:
+            md.append(f"**查询失败**：{self.error}")
+
+        md.append("")
+        md.append(
+            f"*选表：{', '.join(self.tables) or '无'} · "
+            f"尝试 {len(self.attempts)} 次 · 耗时 {self.elapsed:.2f}s*"
+        )
+        return "\n".join(md)
+
+    def _summary(self) -> str:
+        """从结果里抽一句结论，避免只有一张表、没有一句'人话'回答。"""
+        if not self.rows:
+            return "查询成功，但没有返回数据。"
+
+        parts = [f"共返回 **{len(self.rows)}** 行"]
+        cols = list(self.columns) or list(self.rows[0].keys())
+        for c in reversed(cols):               # 优先用最后一列数值列做概括
+            nums: list[float] = []
+            for r in self.rows:
+                try:
+                    nums.append(float(r.get(c)))
+                except (TypeError, ValueError):
+                    nums = []
+                    break
+            if nums:
+                if len(nums) == 1:
+                    parts.append(f"`{c}` = {nums[0]:g}")
+                else:
+                    parts.append(f"`{c}` 范围 {min(nums):g} ~ {max(nums):g}")
+                break
+        return "，".join(parts) + "。"
+
 
 class SQLAgent:
     """自然语言 → SQL → 结果 的闭环 Agent。"""
