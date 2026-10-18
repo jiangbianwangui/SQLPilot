@@ -1,6 +1,8 @@
 {
   "$schema": "https://modelscope.cn/api/v1/studios/deploy_schema.json",
-  "sdk_type": "docker",
-  "resource_configuration": "platform/2v-cpu-16g-mem",
+  "sdk_type": "gradio",
+  "sdk_version": "4.44.0",
+  "base_image": "ubuntu22.04-py310-torch2.3.0-modelscope1.15.0",
+  "resource_configuration": "platform/2v-cpu-8g-mem",
   "port": 7860
 }

@@ -1,10 +1,14 @@
 # SQLPilot —— 自包含部署镜像（FastAPI + 文件型 SQLite 演示库，无需外部数据库）
 #
-# 兼容两类运行环境：
-#   - 魔搭 ModelScope 创空间 / Hugging Face Spaces（以 UID 1000 非 root 运行，端口 7860）
+# 适用环境：
 #   - 本地 docker run（可用 root，端口由 PORT 环境变量决定）
+#   - Hugging Face Spaces（以 UID 1000 非 root 运行，端口 7860）
 # 基础镜像可通过 --build-arg 覆盖：中国大陆 Docker Hub 不可达时，
 # 先 docker pull <镜像源>/library/python:3.11-slim，再指定 BASE_IMAGE 构建即可绕开。
+#
+# 注意：魔搭 ModelScope 创空间的「Docker 类型」在当前账号/平台下不可用
+# （构建节点拉不到外部 registry 镜像）。SQLPilot 在魔搭改走「Gradio 类型」部署，
+# 入口为 app.py，配置见 ms_deploy.json。
 ARG BASE_IMAGE=python:3.11-slim
 FROM ${BASE_IMAGE}
 

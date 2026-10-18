@@ -78,7 +78,9 @@ python -m app.demo_agent
 
 ## 🌐 Web 服务与公网部署
 
-除了命令行，SQLPilot 也提供 HTTP 服务（FastAPI），可一键部署为可公网访问的 Demo。
+除了命令行，SQLPilot 提供两种可公网访问的服务形态：
+
+### 方式一：FastAPI HTTP 服务（含极简聊天前端）
 
 ```bash
 # 本地启动（默认 7860 端口），浏览器打开 http://127.0.0.1:7860
@@ -98,9 +100,26 @@ SQLPILOT_FAKE_LLM=1 uvicorn app.server:app --port 7860
 | POST | `/api/reset` | 清空某会话记忆 |
 | GET | `/` | 极简聊天前端 |
 
+### 方式二：Gradio 双 Tab 演示（推荐用于公网 Demo）
+
+`app.py` 把单步 text-to-SQL 与多步数据分析 Agent 包装成两个 Tab，复用 `app.server` 已初始化的引擎与 LLM 注入，自带会话记忆：
+
+```bash
+pip install -r requirements.txt
+SQLPILOT_FAKE_LLM=1 python app.py   # 浏览器打开 http://127.0.0.1:7860
+```
+
 演示库默认用**文件型 SQLite**（自带 shop 示例数据），无需外部数据库；大模型读 `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_ID` 三个环境变量。生产环境把 `build_demo_engine()` 换成 `build_mysql_engine()`（**只读账号**）即可。
 
-容器化部署见仓库根目录 `Dockerfile` + `ms_deploy.json`（魔搭 ModelScope 创空间 / Hugging Face Spaces 等 Docker 型托管均可用，官方免费档 `platform/2v-cpu-16g-mem`，端口 7860）。
+### 容器化 / 平台部署
+
+- **魔搭 ModelScope 创空间**：走 `Gradio` 类型，配置见 `ms_deploy.json`（`sdk_type: gradio`，官方免费档 `platform/2v-cpu-8g-mem`，端口 7860）。入口为 `app.py`。
+- **本地 Docker / Hugging Face Spaces**：见仓库根目录 `Dockerfile`（FastAPI 镜像，非 root 运行），本地构建命令：
+  ```bash
+  docker build --build-arg BASE_IMAGE=docker.m.daocloud.io/library/python:3.11-slim -t sqlpilot:local .
+  docker run --rm -p 7860:7860 sqlpilot:local
+  ```
+  > 注：魔搭的「Docker 类型」在当前账号/平台下不可用（构建节点拉不到外部 registry 镜像），故魔搭改走 Gradio 类型。
 
 ## 📖 使用示例
 
