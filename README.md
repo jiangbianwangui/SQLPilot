@@ -149,6 +149,30 @@ SQLPILOT_FAKE_LLM=1 python app.py   # 浏览器打开 http://127.0.0.1:7860
 
 演示库默认用**文件型 SQLite**（自带 shop 示例数据），无需外部数据库；大模型读 `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_ID` 三个环境变量。生产环境把 `build_demo_engine()` 换成 `build_mysql_engine()`（**只读账号**）即可。
 
+### 本地用真实 LLM 运行（推荐）
+
+公网 Demo 出于**额度与安全**考虑默认跑演示模式（`SQLPILOT_FAKE_LLM=1`，不消耗任何 API 额度、不暴露 Key）。想体验真实推理，**在你自己电脑上**接一个真 LLM 即可——代码无需改动，全靠环境变量驱动：
+
+```bash
+# 1) 复制环境变量模板，填入你自己的 Key
+cp .env.example .env          # Windows cmd 用：copy .env.example .env
+#   编辑 .env：LLM_API_KEY=sk-xxx，LLM_BASE_URL / LLM_MODEL_ID 按服务商填
+
+# 2) 不设 SQLPILOT_FAKE_LLM（或设为 0），即为真实 LLM 模式
+python app.py                 # 浏览器打开 http://127.0.0.1:7860
+# 或 FastAPI 形态：uvicorn app.server:app --port 7860
+```
+
+推荐服务商 **硅基流动 SiliconFlow**（国内、注册送额度、便宜，OpenAI 兼容）：
+
+| 变量 | 值 |
+| --- | --- |
+| `LLM_BASE_URL` | `https://api.siliconflow.cn/v1` |
+| `LLM_MODEL_ID` | `Qwen/Qwen2.5-7B-Instruct`（或 `deepseek-ai/DeepSeek-V3` 等） |
+| `LLM_API_KEY` | 你在硅基流动控制台申请的 Key |
+
+> 任何 OpenAI 兼容端点都能用（DeepSeek、通义 DashScope 兼容模式、本地 Ollama、vLLM…），只换上面三个变量。`.env` 已被 `.gitignore` 忽略，**不会提交**，可放心填 Key。
+
 ### 容器化 / 平台部署
 
 - **魔搭 ModelScope 创空间**：走 `Gradio` 类型，配置见 `ms_deploy.json`（`sdk_type: gradio`，官方免费档 `platform/2v-cpu-8g-mem`，端口 7860）。入口为 `app.py`。
